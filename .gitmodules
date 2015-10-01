@@ -1,3 +1,6 @@
 [submodule "content/themes/casper"]
 	path = content/themes/casper
 	url = https://github.com/TryGhost/Casper.git
+[submodule "content/themes/ScenaryOnMyBike"]
+	path = content/themes/ScenaryOnMyBike
+	url = https://github.com/chris-yoon90/ScenaryOnMyBike.git
