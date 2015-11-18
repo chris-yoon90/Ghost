@@ -6,11 +6,20 @@ var _               = require('lodash'),
     Promise         = require('bluebird'),
     errors          = require('../errors'),
     api             = require('../api'),
+    jsonpath        = require('jsonpath'),
+    labs            = require('../utils/labs'),
     resources,
+    pathAliases,
     get;
 
 // Endpoints that the helper is able to access
 resources =  ['posts', 'tags', 'users'];
+
+// Short forms of paths which we should understand
+pathAliases     = {
+    'post.tags': 'post.tags[*].slug',
+    'post.author': 'post.author.slug'
+};
 
 /**
  * ## Is Browse
@@ -30,6 +39,34 @@ function isBrowse(context, options) {
 }
 
 /**
+ * ## Resolve Paths
+ * Find and resolve path strings
+ *
+ * @param {Object} data
+ * @param {String} value
+ * @returns {String}
+ */
+function resolvePaths(data, value) {
+    var regex = /\{\{(.*?)\}\}/g;
+
+    value = value.replace(regex, function (match, path) {
+        var result;
+
+        // Handle aliases
+        path = pathAliases[path] ? pathAliases[path] : path;
+        // Handle Handlebars .[] style arrays
+        path = path.replace(/\.\[/g, '[');
+
+        // Do the query, and convert from array to string
+        result = jsonpath.query(data, path).join(',');
+
+        return result;
+    });
+
+    return value;
+}
+
+/**
  * ## Parse Options
  * Ensure options passed in make sense
  *
@@ -38,12 +75,8 @@ function isBrowse(context, options) {
  * @returns {*}
  */
 function parseOptions(data, options) {
-    if (_.isArray(options.tag)) {
-        options.tag = _.pluck(options.tag, 'slug').join(',');
-    }
-
-    if (_.isObject(options.author)) {
-        options.author = options.author.slug;
+    if (_.isString(options.filter)) {
+        options.filter = resolvePaths(data, options.filter);
     }
 
     return options;
@@ -83,14 +116,24 @@ get = function get(context, options) {
     apiOptions = parseOptions(this, apiOptions);
 
     return apiMethod(apiOptions).then(function success(result) {
-        result = _.merge(self, result);
+        var blockParams;
+
+        // If no result is found, call the inverse or `{{else}}` function
         if (_.isEmpty(result[context])) {
             return options.inverse(self, {data: data});
         }
 
+        // block params allows the theme developer to name the data using something like
+        // `{{#get "posts" as |result pagination|}}`
+        blockParams = [result[context]];
+        if (result.meta && result.meta.pagination) {
+            blockParams.push(result.meta.pagination);
+        }
+
+        // Call the main template function
         return options.fn(result, {
             data: data,
-            blockParams: [result[context]]
+            blockParams: blockParams
         });
     }).catch(function error(err) {
         data.error = err.message;
@@ -98,4 +141,23 @@ get = function get(context, options) {
     });
 };
 
-module.exports = get;
+module.exports = function getWithLabs(context, options) {
+    var self = this,
+        errorMessages = [
+            'The {{get}} helper is not available.',
+            'Public API access must be enabled if you wish to use the {{get}} helper.',
+            'See http://support.ghost.org/public-api-beta'
+        ];
+
+    return labs.isSet('publicAPI').then(function (publicAPI) {
+        if (publicAPI === true) {
+            // get helper is  active
+            return get.call(self, context, options);
+        } else {
+            errors.logError.apply(this, errorMessages);
+            return Promise.resolve(function noGetHelper() {
+                return '<script>console.error("' + errorMessages.join(' ') + '");</script>';
+            });
+        }
+    });
+};

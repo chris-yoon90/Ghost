@@ -516,6 +516,8 @@ describe('Frontend Routing', function () {
                 // we initialise data, but not a user. No user should be required for navigating the frontend
                 return testUtils.initData();
             }).then(function () {
+                return testUtils.fixtures.overrideOwnerUser('ghost-owner');
+            }).then(function () {
                 return testUtils.fixtures.insertPosts();
             }).then(function () {
                 return testUtils.fixtures.insertMorePosts(9);
@@ -751,6 +753,32 @@ describe('Frontend Routing', function () {
                     .expect(302)
                     .end(doEnd(done));
             });
+        });
+    });
+
+    describe('Tag edit', function () {
+        it('should redirect without slash', function (done) {
+            request.get('/tag/getting-started/edit')
+                .expect('Location', '/tag/getting-started/edit/')
+                .expect('Cache-Control', testUtils.cacheRules.year)
+                .expect(301)
+                .end(doEnd(done));
+        });
+
+        it('should redirect to tag settings', function (done) {
+            request.get('/tag/getting-started/edit/')
+                .expect('Location', '/ghost/settings/tags/getting-started/')
+                .expect('Cache-Control', testUtils.cacheRules.public)
+                .expect(302)
+                .end(doEnd(done));
+        });
+
+        it('should 404 for non-edit parameter', function (done) {
+            request.get('/tag/getting-started/notedit/')
+                .expect('Cache-Control', testUtils.cacheRules.private)
+                .expect(404)
+                .expect(/Page not found/)
+                .end(doEnd(done));
         });
     });
 

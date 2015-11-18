@@ -13,11 +13,11 @@ strategies = {
      * Use of the client password strategy is implemented to support ember-simple-auth.
      */
     clientPasswordStrategy: function clientPasswordStrategy(clientId, clientSecret, done) {
-        return models.Client.findOne({slug: clientId})
+        return models.Client.findOne({slug: clientId}, {withRelated: ['trustedDomains']})
             .then(function then(model) {
                 if (model) {
-                    var client = model.toJSON();
-                    if (client.secret === clientSecret) {
+                    var client = model.toJSON({include: ['trustedDomains']});
+                    if (client.status === 'enabled' && client.secret === clientSecret) {
                         return done(null, client);
                     }
                 }

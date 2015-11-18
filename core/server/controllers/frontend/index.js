@@ -15,86 +15,16 @@ var _           = require('lodash'),
     template    = require('../../helpers/template'),
     routeMatch  = require('path-match')(),
     safeString  = require('../../utils/index').safeString,
+    handleError = require('./error'),
+    fetchData   = require('./fetch-data'),
+    formatResponse = require('./format-response'),
+    channelConfig  = require('./channel-config'),
     setResponseContext = require('./context'),
+    setRequestIsSecure   = require('./secure'),
+    getActiveThemePaths = require('./theme-paths'),
 
     frontendControllers,
     staticPostPermalink = routeMatch('/:slug/:edit?');
-
-function getPostPage(options) {
-    return api.settings.read('postsPerPage').then(function then(response) {
-        var postPP = response.settings[0],
-            postsPerPage = parseInt(postPP.value, 10);
-
-        // No negative posts per page, must be number
-        if (!isNaN(postsPerPage) && postsPerPage > 0) {
-            options.limit = postsPerPage;
-        }
-        options.include = 'author,tags,fields';
-        return api.posts.browse(options);
-    });
-}
-
-/**
- * formats variables for handlebars in multi-post contexts.
- * If extraValues are available, they are merged in the final value
- * @return {Object} containing page variables
- */
-function formatPageResponse(posts, page, extraValues) {
-    extraValues = extraValues || {};
-
-    var resp = {
-        posts: posts,
-        pagination: page.meta.pagination
-    };
-    return _.extend(resp, extraValues);
-}
-
-/**
- * similar to formatPageResponse, but for single post pages
- * @return {Object} containing page variables
- */
-function formatResponse(post) {
-    return {
-        post: post
-    };
-}
-
-function handleError(next) {
-    return function handleError(err) {
-        // If we've thrown an error message of type: 'NotFound' then we found no path match.
-        if (err.errorType === 'NotFoundError') {
-            return next();
-        }
-
-        return next(err);
-    };
-}
-
-// Add Request context parameter to the data object
-// to be passed down to the templates
-function setReqCtx(req, data) {
-    (Array.isArray(data) ? data : [data]).forEach(function forEach(d) {
-        d.secure = req.secure;
-    });
-}
-
-/**
- * Returns the paths object of the active theme via way of a promise.
- * @return {Promise} The promise resolves with the value of the paths.
- */
-function getActiveThemePaths() {
-    return api.settings.read({
-        key: 'activeTheme',
-        context: {
-            internal: true
-        }
-    }).then(function then(response) {
-        var activeTheme = response.settings[0],
-            paths = config.paths.availableThemes[activeTheme.value];
-
-        return paths;
-    });
-}
 
 /*
 * Sets the response context around a post and renders it
@@ -104,38 +34,32 @@ function getActiveThemePaths() {
 */
 function renderPost(req, res) {
     return function renderPost(post) {
-        return getActiveThemePaths().then(function then(paths) {
-            var view = template.getThemeViewForPost(paths, post),
-                response = formatResponse(post);
+        var paths = getActiveThemePaths(req),
+            view = template.getThemeViewForPost(paths, post),
+            response = formatResponse.single(post);
 
-            setResponseContext(req, res, response);
-            res.render(view, response);
-        });
+        setResponseContext(req, res, response);
+        res.render(view, response);
     };
 }
 
 function renderChannel(channelOpts) {
-    channelOpts = channelOpts || {};
-
     return function renderChannel(req, res, next) {
+        // Parse the parameters we need from the URL
         var pageParam = req.params.page !== undefined ? parseInt(req.params.page, 10) : 1,
-            options = {
-                page: pageParam
-            },
-            hasSlug,
-            filter, filterKey;
+            slugParam = req.params.slug ? safeString(req.params.slug) : undefined;
 
-        // Add the slug if it exists in the route
-        if (channelOpts.route.indexOf(':slug') !== -1 && req.params.slug) {
-            options[channelOpts.name] = safeString(req.params.slug);
-            hasSlug = true;
-        }
+        // Ensure we at least have an empty object for postOptions
+        channelOpts.postOptions = channelOpts.postOptions || {};
+        // Set page on postOptions for the query made later
+        channelOpts.postOptions.page = pageParam;
 
+        // @TODO this should really use the url building code in config.url
         function createUrl(page) {
             var url = config.paths.subdir + channelOpts.route;
 
-            if (hasSlug) {
-                url = url.replace(':slug', options[channelOpts.name]);
+            if (slugParam) {
+                url = url.replace(':slug', slugParam);
             }
 
             if (page && page > 1) {
@@ -145,75 +69,71 @@ function renderChannel(channelOpts) {
             return url;
         }
 
+        // If the page parameter isn't something sensible, redirect
         if (isNaN(pageParam) || pageParam < 1 || (req.params.page !== undefined && pageParam === 1)) {
             return res.redirect(createUrl());
         }
 
-        return getPostPage(options).then(function then(page) {
+        // Call fetchData to get everything we need from the API
+        return fetchData(channelOpts, slugParam).then(function handleResult(result) {
             // If page is greater than number of pages we have, redirect to last page
-            if (pageParam > page.meta.pagination.pages) {
-                return res.redirect(createUrl(page.meta.pagination.pages));
+            if (pageParam > result.meta.pagination.pages) {
+                return res.redirect(createUrl(result.meta.pagination.pages));
             }
 
-            setReqCtx(req, page.posts);
-            if (channelOpts.filter && page.meta.filters[channelOpts.filter]) {
-                filterKey = page.meta.filters[channelOpts.filter];
-                filter = (_.isArray(filterKey)) ? filterKey[0] : filterKey;
-                setReqCtx(req, filter);
-            }
+            // @TODO: figure out if this can be removed, it's supposed to ensure that absolutely URLs get generated
+            // correctly for the various objects, but I believe it doesn't work and a different approach is needed.
+            setRequestIsSecure(req, result.posts);
+            _.each(result.data, function (data) {
+                setRequestIsSecure(req, data);
+            });
 
-            filters.doFilter('prePostsRender', page.posts, res.locals).then(function then(posts) {
-                getActiveThemePaths().then(function then(paths) {
-                    var view = 'index',
-                        result,
-                        extra = {};
+            // @TODO: properly design these filters
+            filters.doFilter('prePostsRender', result.posts, res.locals).then(function then(posts) {
+                var paths = getActiveThemePaths(req),
+                    view = 'index';
 
-                    if (channelOpts.firstPageTemplate && paths.hasOwnProperty(channelOpts.firstPageTemplate + '.hbs')) {
-                        view = (pageParam > 1) ? 'index' : channelOpts.firstPageTemplate;
-                    } else if (channelOpts.slugTemplate) {
-                        view = template.getThemeViewForChannel(paths, channelOpts.name, options[channelOpts.name]);
-                    } else if (paths.hasOwnProperty(channelOpts.name + '.hbs')) {
-                        view = channelOpts.name;
-                    }
+                // Calculate which template to use to render the data
+                if (channelOpts.firstPageTemplate && paths.hasOwnProperty(channelOpts.firstPageTemplate + '.hbs')) {
+                    view = (pageParam > 1) ? 'index' : channelOpts.firstPageTemplate;
+                } else if (channelOpts.slugTemplate) {
+                    view = template.getThemeViewForChannel(paths, channelOpts.name, slugParam);
+                } else if (paths.hasOwnProperty(channelOpts.name + '.hbs')) {
+                    view = channelOpts.name;
+                }
 
-                    if (channelOpts.filter) {
-                        extra[channelOpts.name] = (filterKey) ? filter : '';
-
-                        if (!extra[channelOpts.name]) {
-                            return next();
-                        }
-
-                        result = formatPageResponse(posts, page, extra);
-                    } else {
-                        result = formatPageResponse(posts, page);
-                    }
-
-                    setResponseContext(req, res);
-                    res.render(view, result);
-                });
+                // Do final data formatting and then render
+                result.posts = posts;
+                result = formatResponse.channel(result);
+                setResponseContext(req, res);
+                res.render(view, result);
             });
         }).catch(handleError(next));
     };
 }
 
 frontendControllers = {
-    homepage: renderChannel({
-        name: 'home',
-        route: '/',
-        firstPageTemplate: 'home'
-    }),
-    tag: renderChannel({
-        name: 'tag',
-        route: '/' + config.routeKeywords.tag + '/:slug/',
-        filter: 'tags',
-        slugTemplate: true
-    }),
-    author: renderChannel({
-        name: 'author',
-        route: '/' + config.routeKeywords.author + '/:slug/',
-        filter: 'author',
-        slugTemplate: true
-    }),
+    index: renderChannel(_.cloneDeep(channelConfig.index)),
+    tag: renderChannel(_.cloneDeep(channelConfig.tag)),
+    author: renderChannel(_.cloneDeep(channelConfig.author)),
+    rss: function (req, res, next) {
+        // Temporary hack, channels will allow us to resolve this better eventually
+        var tagPattern = new RegExp('^\\/' + config.routeKeywords.tag + '\\/.+'),
+            authorPattern = new RegExp('^\\/' + config.routeKeywords.author + '\\/.+');
+
+        if (tagPattern.test(res.locals.relativeUrl)) {
+            req.channelConfig = _.cloneDeep(channelConfig.tag);
+        } else if (authorPattern.test(res.locals.relativeUrl)) {
+            req.channelConfig = _.cloneDeep(channelConfig.author);
+        } else {
+            req.channelConfig = _.cloneDeep(channelConfig.index);
+        }
+
+        req.channelConfig.isRSS = true;
+
+        return rss(req, res, next);
+    },
+
     preview: function preview(req, res, next) {
         var params = {
                 uuid: req.params.uuid,
@@ -232,13 +152,12 @@ frontendControllers = {
                 return res.redirect(301, config.urlFor('post', {post: post}));
             }
 
-            setReqCtx(req, post);
+            setRequestIsSecure(req, post);
 
             filters.doFilter('prePostsRender', post, res.locals)
                 .then(renderPost(req, res));
         }).catch(handleError(next));
     },
-
     single: function single(req, res, next) {
         var postPath = req.path,
             params,
@@ -301,7 +220,7 @@ frontendControllers = {
                     return Promise.reject(new errors.NotFoundError());
                 }
 
-                setReqCtx(req, post);
+                setRequestIsSecure(req, post);
 
                 filters.doFilter('prePostsRender', post, res.locals)
                     .then(renderPost(req, res));
@@ -327,22 +246,21 @@ frontendControllers = {
             }
         }).catch(handleError(next));
     },
-    rss: rss,
     private: function private(req, res) {
-        var defaultPage = path.resolve(config.paths.adminViews, 'private.hbs');
-        return getActiveThemePaths().then(function then(paths) {
-            var data = {};
-            if (res.error) {
-                data.error = res.error;
-            }
+        var defaultPage = path.resolve(config.paths.adminViews, 'private.hbs'),
+            paths = getActiveThemePaths(req),
+            data = {};
 
-            setResponseContext(req, res);
-            if (paths.hasOwnProperty('private.hbs')) {
-                return res.render('private', data);
-            } else {
-                return res.render(defaultPage, data);
-            }
-        });
+        if (res.error) {
+            data.error = res.error;
+        }
+
+        setResponseContext(req, res);
+        if (paths.hasOwnProperty('private.hbs')) {
+            return res.render('private', data);
+        } else {
+            return res.render(defaultPage, data);
+        }
     }
 };
 

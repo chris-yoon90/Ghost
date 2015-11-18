@@ -12,11 +12,9 @@ var bodyParser      = require('body-parser'),
     utils           = require('../utils'),
     sitemapHandler  = require('../data/xml/sitemap/handler'),
 
-    apiErrorHandlers = require('./api-error-handlers'),
-    authenticate     = require('./authenticate'),
     authStrategies   = require('./auth-strategies'),
     busboy           = require('./ghost-busboy'),
-    clientAuth       = require('./client-auth'),
+    auth             = require('./auth'),
     cacheControl     = require('./cache-control'),
     checkSSL         = require('./check-ssl'),
     decideIsAdmin    = require('./decide-is-admin'),
@@ -41,10 +39,13 @@ middleware = {
     spamPrevention: spamPrevention,
     privateBlogging: privateBlogging,
     api: {
-        cacheOauthServer: clientAuth.cacheOauthServer,
-        authenticateClient: clientAuth.authenticateClient,
-        generateAccessToken: clientAuth.generateAccessToken,
-        errorHandler: apiErrorHandlers.errorHandler
+        cacheOauthServer: auth.cacheOauthServer,
+        authenticateClient: auth.authenticateClient,
+        authenticateUser: auth.authenticateUser,
+        requiresAuthorizedUser: auth.requiresAuthorizedUser,
+        requiresAuthorizedUserPublicAPI: auth.requiresAuthorizedUserPublicAPI,
+        generateAccessToken: auth.generateAccessToken,
+        errorHandler: errors.handleAPIError
     }
 };
 
@@ -122,8 +123,8 @@ setupMiddleware = function setupMiddleware(blogApp, adminApp) {
     blogApp.use(uncapitalise);
 
     // Body parsing
-    blogApp.use(bodyParser.json());
-    blogApp.use(bodyParser.urlencoded({extended: true}));
+    blogApp.use(bodyParser.json({limit: '1mb'}));
+    blogApp.use(bodyParser.urlencoded({extended: true, limit: '1mb'}));
 
     blogApp.use(passport.initialize());
 
@@ -134,9 +135,6 @@ setupMiddleware = function setupMiddleware(blogApp, adminApp) {
     adminApp.use(cacheControl('private'));
     // API shouldn't be cached
     blogApp.use(routes.apiBaseUri, cacheControl('private'));
-
-    // enable authentication
-    blogApp.use(authenticate);
 
     // local data
     blogApp.use(themeHandler.ghostLocals);

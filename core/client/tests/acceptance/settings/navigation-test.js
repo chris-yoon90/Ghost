@@ -8,130 +8,19 @@ import {
 import { expect } from 'chai';
 import Ember from 'ember';
 import startApp from '../../helpers/start-app';
-import Pretender from 'pretender';
 import { invalidateSession, authenticateSession } from 'ghost/tests/helpers/ember-simple-auth';
 
-const {run} = Ember,
-    // TODO: Pull this into a fixture or similar when required elsewhere
-    requiredSettings = [{
-        created_at: '2015-09-11T09:44:30.805Z',
-        created_by: 1,
-        id: 5,
-        key: 'title',
-        type: 'blog',
-        updated_at: '2015-10-04T16:26:05.195Z',
-        updated_by: 1,
-        uuid: '39e16daf-43fa-4bf0-87d4-44948ba8bf4c',
-        value: 'The Daily Awesome'
-    }, {
-        created_at: '2015-09-11T09:44:30.806Z',
-        created_by: 1,
-        id: 6,
-        key: 'description',
-        type: 'blog',
-        updated_at: '2015-10-04T16:26:05.198Z',
-        updated_by: 1,
-        uuid: 'e6c8b636-6925-4c4a-a5d9-1dc0870fb8ea',
-        value: 'Thoughts, stories and ideas.'
-    }, {
-        created_at: '2015-09-11T09:44:30.809Z',
-        created_by: 1,
-        id: 10,
-        key: 'postsPerPage',
-        type: 'blog',
-        updated_at: '2015-10-04T16:26:05.211Z',
-        updated_by: 1,
-        uuid: '775e6ca1-bcc3-4347-a53d-15d5d76c04a4',
-        value: '5'
-    }, {
-        created_at: '2015-09-11T09:44:30.809Z',
-        created_by: 1,
-        id: 13,
-        key: 'ghost_head',
-        type: 'blog',
-        updated_at: '2015-09-23T13:32:49.858Z',
-        updated_by: 1,
-        uuid: 'df7f3151-bc08-4a77-be9d-dd315b630d51',
-        value: ''
-    }, {
-        created_at: '2015-09-11T09:44:30.809Z',
-        created_by: 1,
-        id: 14,
-        key: 'ghost_foot',
-        type: 'blog',
-        updated_at: '2015-09-23T13:32:49.858Z',
-        updated_by: 1,
-        uuid: '0649d45e-828b-4dd0-8381-3dff6d1d5ddb',
-        value: ''
-    }];
+const {run} = Ember;
 
 describe('Acceptance: Settings - Navigation', function () {
-    let application,
-        store,
-        server;
+    let application;
 
     beforeEach(function () {
         application = startApp();
-        store = application.__container__.lookup('store:main');
-        server = new Pretender(function () {
-            // TODO: This needs to either be fleshed out to include all user data, or be killed with fire
-            // as it needs to be loaded with all authenticated page loads
-            this.get('/ghost/api/v0.1/users/me', function () {
-                return [200, {'Content-Type': 'application/json'}, JSON.stringify({users: []})];
-            });
-
-            this.get('/ghost/api/v0.1/settings/', function (_request) {
-                let response = {meta: {filters: 'blog,theme'}};
-                response.settings = [{
-                    created_at: '2015-09-11T09:44:30.810Z',
-                    created_by: 1,
-                    id: 16,
-                    key: 'navigation',
-                    type: 'blog',
-                    updated_at: '2015-09-23T13:32:49.868Z',
-                    updated_by: 1,
-                    uuid: '4cc51d1c-fcbd-47e6-a71b-fdd1abb223fc',
-                    value: JSON.stringify([
-                        {label: 'Home', url: '/'},
-                        {label: 'About', url: '/about'}
-                    ])
-                }];
-                response.settings.pushObjects(requiredSettings);
-
-                return [200, {'Content-Type': 'application/json'}, JSON.stringify(response)];
-            });
-
-            // TODO: This will be needed for all authenticated page loads
-            // - is there some way to make this a default?
-            this.get('/ghost/api/v0.1/notifications/', function (_request) {
-                return [200, {'Content-Type': 'application/json'}, JSON.stringify({notifications: []})];
-            });
-
-            this.put('/ghost/api/v0.1/settings/', function (_request) {
-                let response = {meta: {}};
-                response.settings = [{
-                    created_at: '2015-09-11T09:44:30.810Z',
-                    created_by: 1,
-                    id: 16,
-                    key: 'navigation',
-                    type: 'blog',
-                    updated_at: '2015-09-23T13:32:49.868Z',
-                    updated_by: 1,
-                    uuid: '4cc51d1c-fcbd-47e6-a71b-fdd1abb223fc',
-                    value: JSON.stringify([
-                        {label: 'Test', url: '/test'},
-                        {label: 'About', url: '/about'}
-                    ])
-                }];
-                response.settings.pushObjects(requiredSettings);
-
-                return [200, {'Content-Type': 'application/json'}, JSON.stringify(response)];
-            });
-        });
     });
 
     afterEach(function () {
-        Ember.run(application, 'destroy');
+        run(application, 'destroy');
     });
 
     it('redirects to signin when not authenticated', function () {
@@ -139,30 +28,30 @@ describe('Acceptance: Settings - Navigation', function () {
         visit('/settings/navigation');
 
         andThen(function () {
-            expect(currentPath()).to.not.equal('settings.navigation');
+            expect(currentURL(), 'currentURL').to.equal('/signin');
         });
     });
 
     it('redirects to team page when authenticated as author', function () {
-        run(() => {
-            let role = store.push('role', {id: 1, name: 'Author'});
-            store.push('user', {id: 'me', roles: [role]});
-        });
+        const role = server.create('role', {name: 'Author'}),
+              user = server.create('user', {roles: [role], slug: 'test-user'});
 
         authenticateSession(application);
         visit('/settings/navigation');
 
         andThen(function () {
-            expect(currentPath()).to.equal('team.user');
+            expect(currentURL(), 'currentURL').to.equal('/team/test-user');
         });
     });
 
     describe('when logged in', function () {
         beforeEach(function () {
-            run(() => {
-                let role = store.push('role', {id: 1, name: 'Administrator'});
-                store.push('user', {id: 'me', roles: [role]});
-            });
+            const role = server.create('role', {name: 'Administrator'}),
+                  user = server.create('user', {roles: [role]});
+
+            // load the settings fixtures
+            // TODO: this should always be run for acceptance tests
+            server.loadFixtures();
 
             authenticateSession(application);
         });
@@ -173,7 +62,7 @@ describe('Acceptance: Settings - Navigation', function () {
             andThen(function () {
                 expect(currentPath()).to.equal('settings.navigation');
                 // test has expected number of rows
-                expect($('.gh-blognav-item').length).to.equal(3);
+                expect($('.gh-blognav-item').length, 'navigation items count').to.equal(3);
             });
         });
 

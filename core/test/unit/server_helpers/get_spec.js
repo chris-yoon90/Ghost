@@ -9,17 +9,23 @@ var should         = require('should'),
 // Stuff we are testing
     handlebars     = hbs.handlebars,
     helpers        = require('../../../server/helpers'),
-    api            = require('../../../server/api');
+    api            = require('../../../server/api'),
+
+    labs           = require('../../../server/utils/labs'),
+
+    sandbox = sinon.sandbox.create();
 
 describe('{{#get}} helper', function () {
-    var sandbox;
+    var fn, inverse;
 
     before(function () {
         utils.loadHelpers();
     });
 
     beforeEach(function () {
-        sandbox = sinon.sandbox.create();
+        fn = sandbox.spy();
+        inverse = sandbox.spy();
+        sandbox.stub(labs, 'isSet').returns(new Promise.resolve(true));
     });
 
     afterEach(function () {
@@ -31,30 +37,30 @@ describe('{{#get}} helper', function () {
     });
 
     describe('posts', function () {
-        var testPostsArr = [
-            {id: 1, title: 'Test Post 1', author: 'cameron'},
-            {id: 2, title: 'Test Post 2', author: 'cameron', featured: true},
+        var browsePostsStub, readPostsStub, readTagsStub, readUsersStub, testPostsArr = [
+            {id: 1, title: 'Test Post 1', author: {slug: 'cameron'}},
+            {id: 2, title: 'Test Post 2', author: {slug: 'cameron'}, featured: true},
             {id: 3, title: 'Test Post 3', tags: [{slug: 'test'}]},
             {id: 4, title: 'Test Post 4'}
-        ];
+        ],
+            meta = {pagination: {}};
         beforeEach(function () {
-            var browseStub = sandbox.stub(api.posts, 'browse'),
-                readStub = sandbox.stub(api.posts, 'read');
+            browsePostsStub = sandbox.stub(api.posts, 'browse');
+            readPostsStub = sandbox.stub(api.posts, 'read');
+            readTagsStub = sandbox.stub(api.tags, 'read').returns(new Promise.resolve({tags: []}));
+            readUsersStub = sandbox.stub(api.users, 'read').returns(new Promise.resolve({users: []}));
 
-            browseStub.returns(new Promise.resolve({posts: testPostsArr}));
-            browseStub.withArgs({limit: '3'}).returns(new Promise.resolve({posts: testPostsArr.slice(0, 3)}));
-            browseStub.withArgs({limit: '1'}).returns(new Promise.resolve({posts: testPostsArr.slice(0, 1)}));
-            browseStub.withArgs({tag: 'test'}).returns(new Promise.resolve({posts: testPostsArr.slice(2, 3)}));
-            browseStub.withArgs({tag: 'none'}).returns(new Promise.resolve({posts: []}));
-            browseStub.withArgs({author: 'cameron'}).returns(new Promise.resolve({posts: testPostsArr.slice(0, 2)}));
-            browseStub.withArgs({featured: 'true'}).returns(new Promise.resolve({posts: testPostsArr.slice(2, 3)}));
-            readStub.withArgs({id: '2'}).returns(new Promise.resolve({posts: testPostsArr.slice(1, 2)}));
+            browsePostsStub.returns(new Promise.resolve({posts: testPostsArr}));
+            browsePostsStub.withArgs({limit: '3'}).returns(new Promise.resolve({posts: testPostsArr.slice(0, 3), meta: meta}));
+            browsePostsStub.withArgs({limit: '1'}).returns(new Promise.resolve({posts: testPostsArr.slice(0, 1)}));
+            browsePostsStub.withArgs({filter: 'tags:test'}).returns(new Promise.resolve({posts: testPostsArr.slice(2, 3)}));
+            browsePostsStub.withArgs({filter: 'tags:none'}).returns(new Promise.resolve({posts: []}));
+            browsePostsStub.withArgs({filter: 'author:cameron'}).returns(new Promise.resolve({posts: testPostsArr.slice(0, 2)}));
+            browsePostsStub.withArgs({filter: 'featured:true'}).returns(new Promise.resolve({posts: testPostsArr.slice(2, 3)}));
+            readPostsStub.withArgs({id: '2'}).returns(new Promise.resolve({posts: testPostsArr.slice(1, 2)}));
         });
 
         it('should handle default browse posts call', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'posts',
@@ -71,9 +77,6 @@ describe('{{#get}} helper', function () {
         });
 
         it('should handle browse posts call with limit 3', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'posts',
@@ -90,9 +93,6 @@ describe('{{#get}} helper', function () {
         });
 
         it('should handle browse posts call with limit 1', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'posts',
@@ -109,9 +109,6 @@ describe('{{#get}} helper', function () {
         });
 
         it('should handle browse posts call with limit 1', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'posts',
@@ -128,31 +125,10 @@ describe('{{#get}} helper', function () {
         });
 
         it('should handle browse post call with explicit tag', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'posts',
-                {hash: {tag: 'test'}, fn: fn, inverse: inverse}
-            ).then(function () {
-                fn.calledOnce.should.be.true;
-                fn.firstCall.args[0].should.be.an.Object.with.property('posts');
-                fn.firstCall.args[0].posts.should.have.lengthOf(1);
-                fn.firstCall.args[0].posts.should.eql(testPostsArr.slice(2, 3));
-                inverse.called.should.be.false;
-                done();
-            }).catch(done);
-        });
-
-        it('should handle browse post call with relative tag', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
-            helpers.get.call(
-                {},
-                'posts',
-                {hash: {tag: [{slug: 'test'}]}, fn: fn, inverse: inverse}
+                {hash: {filter: 'tags:test'}, fn: fn, inverse: inverse}
             ).then(function () {
                 fn.calledOnce.should.be.true;
                 fn.firstCall.args[0].should.be.an.Object.with.property('posts');
@@ -164,31 +140,10 @@ describe('{{#get}} helper', function () {
         });
 
         it('should handle browse post call with explicit author', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'posts',
-                {hash: {author: 'cameron'}, fn: fn, inverse: inverse}
-            ).then(function () {
-                fn.calledOnce.should.be.true;
-                fn.firstCall.args[0].should.be.an.Object.with.property('posts');
-                fn.firstCall.args[0].posts.should.have.lengthOf(2);
-                fn.firstCall.args[0].posts.should.eql(testPostsArr.slice(0, 2));
-                inverse.called.should.be.false;
-                done();
-            }).catch(done);
-        });
-
-        it('should handle browse post call with relative author', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
-            helpers.get.call(
-                {},
-                'posts',
-                {hash: {author: {slug: 'cameron'}}, fn: fn, inverse: inverse}
+                {hash: {filter: 'author:cameron'}, fn: fn, inverse: inverse}
             ).then(function () {
                 fn.calledOnce.should.be.true;
                 fn.firstCall.args[0].should.be.an.Object.with.property('posts');
@@ -200,13 +155,10 @@ describe('{{#get}} helper', function () {
         });
 
         it('should handle browse post call with featured:true', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'posts',
-                {hash: {featured: 'true'}, fn: fn, inverse: inverse}
+                {hash: {filter: 'featured:true'}, fn: fn, inverse: inverse}
             ).then(function () {
                 fn.calledOnce.should.be.true;
                 fn.firstCall.args[0].should.be.an.Object.with.property('posts');
@@ -218,9 +170,6 @@ describe('{{#get}} helper', function () {
         });
 
         it('should handle read post by id call', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'posts',
@@ -237,13 +186,10 @@ describe('{{#get}} helper', function () {
         });
 
         it('should handle empty result set', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'posts',
-                {hash: {tag: 'none'}, fn: fn, inverse: inverse}
+                {hash: {filter: 'tags:none'}, fn: fn, inverse: inverse}
             ).then(function () {
                 fn.called.should.be.false;
                 inverse.calledOnce.should.be.true;
@@ -257,9 +203,6 @@ describe('{{#get}} helper', function () {
 
     describe('general error handling', function () {
         it('should return an error for an unknown resource', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'magic',
@@ -276,13 +219,10 @@ describe('{{#get}} helper', function () {
         });
 
         it('should handle error from the API', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'posts',
-                {hash: {tag: 'thing!'}, fn: fn, inverse: inverse}
+                {hash: {status: 'thing!'}, fn: fn, inverse: inverse}
             ).then(function () {
                 fn.called.should.be.false;
                 inverse.calledOnce.should.be.true;
@@ -295,9 +235,6 @@ describe('{{#get}} helper', function () {
         });
 
         it('should show warning for call without any options', function (done) {
-            var fn = sinon.spy(),
-                inverse = sinon.spy();
-
             helpers.get.call(
                 {},
                 'posts'
@@ -309,4 +246,89 @@ describe('{{#get}} helper', function () {
             }).catch(done);
         });
     });
+
+    describe('path resolution', function () {
+        var browseStub, readStub, data = {
+            post: {id: 3, title: 'Test 3', author: {slug: 'cameron'}, tags: [{slug: 'test'}, {slug: 'magic'}]}
+        };
+
+        beforeEach(function () {
+            browseStub = sandbox.stub(api.posts, 'browse').returns(new Promise.resolve());
+            readStub = sandbox.stub(api.posts, 'read').returns(new Promise.resolve());
+        });
+
+        it('should resolve post.tags alias', function (done) {
+            helpers.get.call(
+                data,
+                'posts',
+                {hash: {filter: 'tags:[{{post.tags}}]'}, fn: fn, inverse: inverse}
+            ).then(function () {
+                browseStub.firstCall.args.should.be.an.Array.with.lengthOf(1);
+                browseStub.firstCall.args[0].should.be.an.Object.with.property('filter');
+                browseStub.firstCall.args[0].filter.should.eql('tags:[test,magic]');
+
+                done();
+            }).catch(done);
+        });
+
+        it('should resolve post.author alias', function (done) {
+            helpers.get.call(
+                data,
+                'posts',
+                {hash: {filter: 'author:{{post.author}}'}, fn: fn, inverse: inverse}
+            ).then(function () {
+                browseStub.firstCall.args.should.be.an.Array.with.lengthOf(1);
+                browseStub.firstCall.args[0].should.be.an.Object.with.property('filter');
+                browseStub.firstCall.args[0].filter.should.eql('author:cameron');
+
+                done();
+            }).catch(done);
+        });
+
+        it('should resolve basic path', function (done) {
+            helpers.get.call(
+                data,
+                'posts',
+                {hash: {filter: 'id:-{{post.id}}'}, fn: fn, inverse: inverse}
+            ).then(function () {
+                    browseStub.firstCall.args.should.be.an.Array.with.lengthOf(1);
+                    browseStub.firstCall.args[0].should.be.an.Object.with.property('filter');
+                    browseStub.firstCall.args[0].filter.should.eql('id:-3');
+
+                    done();
+                }).catch(done);
+        });
+
+        it('should handle arrays the same as handlebars', function (done) {
+            var tpl = handlebars.compile('{{post.tags.[0].slug}}'),
+                output = tpl(data);
+
+            helpers.get.call(
+                data,
+                'posts',
+                {hash: {filter: 'tags:{{post.tags.[0].slug}}'}, fn: fn, inverse: inverse}
+            ).then(function () {
+                browseStub.firstCall.args.should.be.an.Array.with.lengthOf(1);
+                browseStub.firstCall.args[0].should.be.an.Object.with.property('filter');
+                browseStub.firstCall.args[0].filter.should.eql('tags:' + output);
+
+                done();
+            }).catch(done);
+        });
+
+        it('should output nothing if path does not resolve', function (done) {
+            helpers.get.call(
+                data,
+                'posts',
+                {hash: {filter: 'id:{{post.thing}}'}, fn: fn, inverse: inverse}
+            ).then(function () {
+                    browseStub.firstCall.args.should.be.an.Array.with.lengthOf(1);
+                    browseStub.firstCall.args[0].should.be.an.Object.with.property('filter');
+                    browseStub.firstCall.args[0].filter.should.eql('id:');
+
+                    done();
+                }).catch(done);
+        });
+    });
 });
+
