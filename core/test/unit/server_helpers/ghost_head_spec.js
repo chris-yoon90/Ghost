@@ -43,7 +43,7 @@ describe('{{ghost_head}} helper', function () {
             ]
         }));
 
-        sandbox.stub(labs, 'isSet').returns(new Promise.resolve(true));
+        sandbox.stub(labs, 'isSet').returns(true);
     });
 
     function expectGhostClientMeta(rendered) {
@@ -776,6 +776,106 @@ describe('{{ghost_head}} helper', function () {
 
                 done();
             }).catch(done);
+        });
+    });
+
+    describe('with Ajax Helper', function () {
+        beforeEach(function () {
+            utils.overrideConfig({
+                url: '',
+                urlSSL: '',
+                forceAdminSSL: false
+            });
+        });
+
+        it('renders script tags with basic configuration', function (done) {
+            helpers.ghost_head.call(
+                {safeVersion: '0.3', context: ['paged', 'index'], post: false},
+                {data: {root: {context: []}}}
+            ).then(function (rendered) {
+                should.exist(rendered);
+                expectGhostClientMeta(rendered);
+                rendered.string.should.match(/<script type="text\/javascript">\(function \(\) \{/);
+                rendered.string.should.match(/'use strict';/);
+                rendered.string.should.match(/<\/script>/);
+
+                done();
+            });
+        });
+
+        it('renders basic url correctly', function (done) {
+            utils.overrideConfig({
+                url: 'http://testurl.com/'
+            });
+
+            helpers.ghost_head.call(
+                {safeVersion: '0.3', context: ['paged', 'index'], post: false},
+                {data: {root: {context: []}}}
+            ).then(function (rendered) {
+                should.exist(rendered);
+                expectGhostClientMeta(rendered);
+                rendered.string.should.match(/url: '\/ghost\/api\/v0\.1\/'/);
+                rendered.string.should.match(/useOrigin: 'true'/);
+
+                done();
+            });
+        });
+
+        it('renders basic url correctly with subdirectory', function (done) {
+            utils.overrideConfig({
+                url: 'http://testurl.com/blog/'
+            });
+
+            helpers.ghost_head.call(
+                {safeVersion: '0.3', context: ['paged', 'index'], post: false},
+                {data: {root: {context: []}}}
+            ).then(function (rendered) {
+                should.exist(rendered);
+                expectGhostClientMeta(rendered);
+                rendered.string.should.match(/url: '\/blog\/ghost\/api\/v0\.1\/'/);
+                rendered.string.should.match(/useOrigin: 'true'/);
+
+                done();
+            });
+        });
+
+        it('renders correct https url with forceAdminSSL set', function (done) {
+            utils.overrideConfig({
+                url: 'http://testurl.com/',
+                forceAdminSSL: true
+            });
+
+            helpers.ghost_head.call(
+                {safeVersion: '0.3', context: ['paged', 'index'], post: false},
+                {data: {root: {context: []}}}
+            ).then(function (rendered) {
+                should.exist(rendered);
+                expectGhostClientMeta(rendered);
+                rendered.string.should.match(/url: 'https:\/\/testurl\.com\/ghost\/api\/v0\.1\/'/);
+                rendered.string.should.match(/useOrigin: 'false'/);
+
+                done();
+            });
+        });
+
+        it('renders correct https url if urlSSL is set and forceAdminSSL is also set', function (done) {
+            utils.overrideConfig({
+                url: 'http://testurl.com/',
+                urlSSL: 'https://sslurl.com/',
+                forceAdminSSL: true
+            });
+
+            helpers.ghost_head.call(
+                {safeVersion: '0.3', context: ['paged', 'index'], post: false},
+                {data: {root: {context: []}}}
+            ).then(function (rendered) {
+                should.exist(rendered);
+                expectGhostClientMeta(rendered);
+                rendered.string.should.match(/url: 'https:\/\/sslurl\.com\/ghost\/api\/v0\.1\/'/);
+                rendered.string.should.match(/useOrigin: 'false'/);
+
+                done();
+            });
         });
     });
 });
