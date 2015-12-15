@@ -1,4 +1,3 @@
 {
-    "cwd": "core/client/",
-    "directory": "bower_components"
+    "directory": "core/client/bower_components"
 }
