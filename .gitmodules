@@ -4,3 +4,6 @@
 [submodule "content/themes/ScenaryOnMyBike"]
 	path = content/themes/ScenaryOnMyBike
 	url = https://github.com/chris-yoon90/ScenaryOnMyBike.git
+[submodule "content/themes/ghost-test-theme"]
+	path = content/themes/ghost-test-theme
+	url = https://github.com/chris-yoon90/ghost-test-theme.git
